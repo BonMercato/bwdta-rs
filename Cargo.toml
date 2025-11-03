@@ -1,0 +1,20 @@
+[package]
+name = "bwdta"
+description = "A library for working with the DTA format used by ERPSuite (formerly BüroWARE)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["cozyGalvinism <jean@der-capta.in>"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"], default-features = false, optional = true }
+thiserror = { version = "2.0", default-features = false }
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+
+[features]
+default = ["std", "io"]
+serde = ["dep:serde"]
+std = ["thiserror/std", "serde?/std"]
+io = ["std"]
