@@ -41,25 +41,16 @@ pub static DEFAULT_PARAM_ORDER: [&str; 9] = [
     "HTTPREQUEST",
 ];
 
-/// Trait for record identifiers that define record type and parameter validation.
+/// Trait for record identifiers that define the structure and validation rules for DTA records.
 ///
-/// Implementations of this trait specify the SKZ (Satzkennzeichen/Record Identifier),
-/// required and optional parameters, and parameter ordering for a specific record type.
+/// This trait allows different record types to have their own parameter validation rules
+/// and default parameter orders while maintaining a common interface for serialization
+/// and deserialization.
 pub trait RecordIdentifier: Clone {
-    /// Returns whether parameter validation should be performed.
-    ///
-    /// When `true`, parameters are validated against the allowed lists.
-    /// When `false`, any parameter is accepted (useful for dynamic identifiers).
-    fn check_params() -> bool {
-        true
-    }
+    /// Whether this identifier type validates parameters.
+    fn check_params() -> bool;
     /// Returns the set of required parameters for this record type.
-    fn required_params() -> HashSet<String> {
-        DEFAULT_REQUIRED_PARAMS
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    }
+    fn required_params() -> HashSet<String>;
     /// Returns the set of optional parameters for this record type.
     fn optional_params() -> HashSet<String> {
         DEFAULT_OPTIONAL_PARAMS
@@ -73,20 +64,14 @@ pub trait RecordIdentifier: Clone {
     }
     /// Returns the SKZ (Satzkennzeichen/Record Identifier) for this record type.
     fn skz(&self) -> String;
+    /// Creates an identifier instance from an SKZ string.
+    fn from_skz(skz: &str) -> Self;
 }
 
 /// A dynamic record identifier that accepts any SKZ without parameter validation.
 ///
 /// Use this when you need to work with custom or unknown record types.
-///
-/// # Examples
-///
-/// ```
-/// use bwdta::DynamicRecordIdentifier;
-///
-/// let identifier = DynamicRecordIdentifier::new("CUSTOM");
-/// ```
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DynamicRecordIdentifier {
     skz: String,
 }
@@ -98,6 +83,12 @@ impl DynamicRecordIdentifier {
         Self {
             skz: skz.to_string(),
         }
+    }
+}
+
+impl Default for DynamicRecordIdentifier {
+    fn default() -> Self {
+        Self::new("UNKNOWN")
     }
 }
 
@@ -127,6 +118,10 @@ impl RecordIdentifier for DynamicRecordIdentifier {
     fn skz(&self) -> String {
         self.skz.clone()
     }
+
+    fn from_skz(skz: &str) -> Self {
+        Self::new(skz)
+    }
 }
 
 /// Record identifier for address records (ADR).
@@ -141,10 +136,14 @@ impl RecordIdentifier for AddressIdentifier {
     }
 
     fn required_params() -> HashSet<String> {
-        DEFAULT_REQUIRED_PARAMS
+        ["STAMMKALK", "LANDKUNDA"]
             .iter()
             .map(|s| s.to_string())
             .collect()
+    }
+
+    fn skz(&self) -> String {
+        "ADR".to_string()
     }
 
     fn optional_params() -> HashSet<String> {
@@ -191,8 +190,8 @@ impl RecordIdentifier for AddressIdentifier {
             .collect()
     }
 
-    fn skz(&self) -> String {
-        "ADR".to_string()
+    fn from_skz(_skz: &str) -> Self {
+        Self
     }
 }
 
@@ -203,6 +202,17 @@ impl RecordIdentifier for AddressIdentifier {
 pub struct AddressProductIdentifier;
 
 impl RecordIdentifier for AddressProductIdentifier {
+    fn check_params() -> bool {
+        true
+    }
+
+    fn required_params() -> HashSet<String> {
+        ["STAMMKALK", "LANDKUNDA"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
     fn optional_params() -> HashSet<String> {
         [
             "EANCODE",
@@ -234,6 +244,10 @@ impl RecordIdentifier for AddressProductIdentifier {
     fn skz(&self) -> String {
         "ADA".to_string()
     }
+
+    fn from_skz(_skz: &str) -> Self {
+        Self
+    }
 }
 
 /// Record identifier for product/article records (ART).
@@ -243,6 +257,14 @@ impl RecordIdentifier for AddressProductIdentifier {
 pub struct ProductIdentifier;
 
 impl RecordIdentifier for ProductIdentifier {
+    fn check_params() -> bool {
+        true
+    }
+
+    fn required_params() -> HashSet<String> {
+        HashSet::new() // No required params for ART
+    }
+
     fn skz(&self) -> String {
         "ART".to_string()
     }
@@ -294,6 +316,10 @@ impl RecordIdentifier for ProductIdentifier {
             .map(|s| s.to_string())
             .collect()
     }
+
+    fn from_skz(_skz: &str) -> Self {
+        Self
+    }
 }
 
 /// Record identifier for delivery address records (LFA).
@@ -303,24 +329,20 @@ impl RecordIdentifier for ProductIdentifier {
 pub struct DeliveryAddressIdentifier;
 
 impl RecordIdentifier for DeliveryAddressIdentifier {
+    fn check_params() -> bool {
+        true
+    }
+
+    fn required_params() -> HashSet<String> {
+        HashSet::new() // No required params for LFA
+    }
+
     fn skz(&self) -> String {
         "LFA".to_string()
     }
 
-    fn optional_params() -> HashSet<String> {
-        ["LETZTE_ADR_SETZEN"]
-            .iter()
-            .chain(DEFAULT_OPTIONAL_PARAMS.iter())
-            .map(|s| s.to_string())
-            .collect()
-    }
-
-    fn param_order() -> HashSet<String> {
-        DEFAULT_PARAM_ORDER
-            .iter()
-            .chain(&["LETZTE_ADR_SETZEN"])
-            .map(|s| s.to_string())
-            .collect()
+    fn from_skz(_skz: &str) -> Self {
+        Self
     }
 }
 
@@ -331,6 +353,14 @@ impl RecordIdentifier for DeliveryAddressIdentifier {
 pub struct OrderIdentifier;
 
 impl RecordIdentifier for OrderIdentifier {
+    fn check_params() -> bool {
+        true
+    }
+
+    fn required_params() -> HashSet<String> {
+        HashSet::new() // No required params for BEL
+    }
+
     fn skz(&self) -> String {
         "BEL".to_string()
     }
@@ -382,6 +412,10 @@ impl RecordIdentifier for OrderIdentifier {
             .map(|s| s.to_string())
             .collect()
     }
+
+    fn from_skz(_skz: &str) -> Self {
+        Self
+    }
 }
 
 /// Record identifier for order note records.
@@ -395,6 +429,14 @@ pub enum OrderNoteIdentifier {
 }
 
 impl RecordIdentifier for OrderNoteIdentifier {
+    fn check_params() -> bool {
+        true
+    }
+
+    fn required_params() -> HashSet<String> {
+        HashSet::new() // No required params for BNOT
+    }
+
     fn skz(&self) -> String {
         match self {
             OrderNoteIdentifier::BNOT => "BNOT".to_string(),
@@ -418,6 +460,15 @@ impl RecordIdentifier for OrderNoteIdentifier {
             .map(|s| s.to_string())
             .collect()
     }
+
+    fn from_skz(skz: &str) -> Self {
+        match skz {
+            "BNOT" => OrderNoteIdentifier::BNOT,
+            "BNOTN" => OrderNoteIdentifier::BNOTN,
+            "BNOTV" => OrderNoteIdentifier::BNOTV,
+            _ => OrderNoteIdentifier::BNOT, // Default fallback
+        }
+    }
 }
 
 /// Record identifier for order position/line item records (POS).
@@ -427,6 +478,14 @@ impl RecordIdentifier for OrderNoteIdentifier {
 pub struct OrderPositionIdentifier;
 
 impl RecordIdentifier for OrderPositionIdentifier {
+    fn check_params() -> bool {
+        true
+    }
+
+    fn required_params() -> HashSet<String> {
+        HashSet::new() // No required params for POS
+    }
+
     fn skz(&self) -> String {
         "POS".to_string()
     }
@@ -496,6 +555,10 @@ impl RecordIdentifier for OrderPositionIdentifier {
             .map(|s| s.to_string())
             .collect()
     }
+
+    fn from_skz(_skz: &str) -> Self {
+        Self
+    }
 }
 
 impl Default for AddressIdentifier {
@@ -525,6 +588,12 @@ impl Default for DeliveryAddressIdentifier {
 impl Default for OrderIdentifier {
     fn default() -> Self {
         Self
+    }
+}
+
+impl Default for OrderNoteIdentifier {
+    fn default() -> Self {
+        OrderNoteIdentifier::BNOT
     }
 }
 

@@ -1,15 +1,15 @@
-//! Serde serialization support for DTA format.
+//! Serde serialization/deserialization support for DTA format.
 //!
-//! This module provides serialization of Rust structs to DTA format strings
+//! This module provides serialization and deserialization of Rust structs to/from DTA format strings
 //! using the serde framework. Enable the `serde` feature to use this module.
 //!
 //! # Examples
 //!
 //! ```
-//! use serde::Serialize;
-//! use bwdta::{DynamicRecordIdentifier, to_dta_string};
+//! use serde::{Serialize, Deserialize};
+//! use bwdta::{DynamicRecordIdentifier, to_dta_string, from_dta_string};
 //!
-//! #[derive(Serialize)]
+//! #[derive(Serialize, Deserialize)]
 //! struct Address {
 //!     #[serde(rename = "STAMMKALK")]
 //!     stammkalk: String,
@@ -30,10 +30,11 @@
 //! # Ok::<(), bwdta::DtaError>(())
 //! ```
 
-use serde::{Serialize, ser};
+use serde::{Serialize, ser, de};
 
 #[cfg(not(feature = "std"))]
 use alloc::{
+    collections::BTreeMap as HashMap,
     format,
     string::{String, ToString},
     vec::Vec,
@@ -633,4 +634,197 @@ pub fn to_dta_string<T: RecordIdentifier, S: Serialize>(
 ) -> Result<String, DtaError> {
     let serializer = DtaSerializer::<T>::new(identifier);
     value.serialize(serializer)
+}
+
+/// A deserializer for the DTA format.
+pub struct DtaDeserializer<T: RecordIdentifier> {
+    identifier: T,
+    row: DtaRow<T>,
+}
+
+impl<T: RecordIdentifier> DtaDeserializer<T> {
+    pub fn new(identifier: T, input: &str) -> Result<Self, DtaError> {
+        // Parse the DTA string first to extract the SKZ, then validate it matches
+        let temp_row = parse_dta_string(input)?;
+        
+        // Validate that the identifier matches the parsed SKZ
+        if temp_row.identifier().skz() != identifier.skz() {
+            return Err(DtaError::ParseError(format!(
+                "SKZ mismatch: expected {}, got {}",
+                identifier.skz(),
+                temp_row.identifier().skz()
+            )));
+        }
+        
+        // Create a new row with the correct identifier type and copy the data
+        let mut row = DtaRow::new(identifier.clone());
+        
+        // Copy parameters
+        for (key, value) in temp_row.params {
+            row.params.insert(key, value);
+        }
+        
+        // Copy data fields
+        row.data_fields = temp_row.data_fields;
+        
+        Ok(Self { identifier, row })
+    }
+}
+
+impl<'de, T: RecordIdentifier> de::Deserializer<'de> for DtaDeserializer<T> {
+    type Error = DtaError;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, DtaError>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_map(DtaMapAccess::new(self.row))
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, DtaError>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.deserialize_any(visitor)
+    }
+
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, DtaError>
+    where
+        V: de::Visitor<'de>,
+    {
+        self.deserialize_any(visitor)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map enum identifier ignored_any
+    }
+}
+
+/// Map access for DTA format deserialization.
+struct DtaMapAccess<T: RecordIdentifier> {
+    row: DtaRow<T>,
+    param_keys: Vec<String>,
+    data_keys: Vec<String>,
+    current_index: usize,
+    is_params: bool,
+}
+
+impl<T: RecordIdentifier> DtaMapAccess<T> {
+    fn new(row: DtaRow<T>) -> Self {
+        let param_keys: Vec<String> = row.params.keys().cloned().collect();
+        let data_keys: Vec<String> = row.data_fields.iter().map(|(k, _)| k.clone()).collect();
+        Self {
+            row,
+            param_keys,
+            data_keys,
+            current_index: 0,
+            is_params: true,
+        }
+    }
+}
+
+impl<'de, T: RecordIdentifier> de::MapAccess<'de> for DtaMapAccess<T> {
+    type Error = DtaError;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, DtaError>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        // Try parameters first
+        if self.is_params && self.current_index < self.param_keys.len() {
+            let key = &self.param_keys[self.current_index];
+            return seed.deserialize(de::value::StrDeserializer::new(key)).map(Some);
+        }
+
+        // Then try data fields
+        if !self.is_params {
+            let data_index = self.current_index - self.param_keys.len();
+            if data_index < self.data_keys.len() {
+                let key = &self.data_keys[data_index];
+                return seed.deserialize(de::value::StrDeserializer::new(key)).map(Some);
+            }
+        }
+
+        // Switch from params to data fields if needed
+        if self.is_params && self.current_index >= self.param_keys.len() {
+            self.is_params = false;
+            return self.next_key_seed(seed);
+        }
+
+        Ok(None)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, DtaError>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        let key = if self.is_params {
+            &self.param_keys[self.current_index]
+        } else {
+            let data_index = self.current_index - self.param_keys.len();
+            &self.data_keys[data_index]
+        };
+
+        self.current_index += 1;
+
+        // Look for the value in parameters first, then data fields
+        let value = self.row.params.get(key)
+            .or_else(|| self.row.data_fields.iter().find(|(k, _)| k == key).map(|(_, v)| v))
+            .ok_or_else(|| DtaError::Serde(format!("Missing value for key: {}", key)))?;
+
+        seed.deserialize(de::value::StrDeserializer::new(value))
+    }
+}
+
+/// Deserializes a DTA format string into a value.
+///
+/// This is the main entry point for serde-based deserialization. Fields can be marked
+/// as parameters by surrounding the field name with `$` symbols in the `#[serde(rename)]`
+/// attribute.
+///
+/// # Examples
+///
+/// ```
+/// use serde::Deserialize;
+/// use bwdta::{DynamicRecordIdentifier, from_dta_string};
+///
+/// #[derive(Deserialize)]
+/// struct Record {
+///     #[serde(rename = "STAMMKALK")]  // This is a parameter
+///     stammkalk: String,
+///     #[serde(rename = "aa")]       // This is a data field
+///     data_field: String,
+/// }
+///
+/// let dta_string = "þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþaaþ123 \n";
+/// let record: Record = from_dta_string::<DynamicRecordIdentifier, _>(dta_string)?;
+/// # Ok::<(), bwdta::DtaError>(())
+/// ```
+pub fn from_dta_string<'a, T: RecordIdentifier, D: de::Deserialize<'a>>(
+    input: &'a str,
+) -> Result<D, DtaError> {
+    // First parse to get the SKZ from the DTA string
+    let temp_row = parse_dta_string(input)?;
+    let identifier = T::from_skz(&temp_row.identifier().skz());
+    
+    let deserializer = DtaDeserializer::new(identifier, input)?;
+    D::deserialize(deserializer)
+}
+
+/// Deserializes a DTA format string into a value with a specific identifier.
+///
+/// Use this when you need to specify a particular identifier type that doesn't implement Default.
+pub fn from_dta_string_with_identifier<'a, T: RecordIdentifier, D: de::Deserialize<'a>>(
+    input: &'a str,
+    identifier: T,
+) -> Result<D, DtaError> {
+    let deserializer = DtaDeserializer::new(identifier, input)?;
+    D::deserialize(deserializer)
 }

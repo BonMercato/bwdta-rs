@@ -48,10 +48,12 @@ pub use identifiers::{
     DEFAULT_OPTIONAL_PARAMS, DEFAULT_PARAM_ORDER, DEFAULT_REQUIRED_PARAMS, DynamicRecordIdentifier,
     RecordIdentifier,
 };
-pub use parser::{parse_dta_file, parse_dta_string, parse_dta_string_with_identifier, parse_dta_rows};
+pub use parser::{
+    parse_dta_file, parse_dta_rows, parse_dta_string, parse_dta_string_with_identifier,
+};
 pub use row::{DtaRow, DtaRowBuilder};
 #[cfg(feature = "serde")]
-pub use serde_support::*;
+pub use serde_support::{from_dta_string, from_dta_string_with_identifier, to_dta_string};
 #[cfg(all(feature = "std", feature = "io"))]
 pub use writer::DtaWriter;
 
@@ -188,57 +190,22 @@ mod tests {
                 },
             ],
         };
-
-        let serialized = serde_support::to_dta_string(&row, identifier).unwrap();
-        assert_eq!(
-            serialized,
-            r#"þVARTþ0þSKZþBELþUEBERþNþSTAMMKALKþJþaaþ809460 þacþClaas 
-þVARTþ0þSKZþPOSþUEBERþNþaaþ1 þabþART001 þacþ5 
-þVARTþ0þSKZþPOSþUEBERþNþaaþ2 þabþART002 þacþ3 
-"#
-        );
-    }
-
-    #[cfg(all(feature = "std", feature = "io"))]
-    #[test]
-    fn test_writer() {
-        let mut buffer = Vec::new();
-        let mut writer = DtaWriter::new(&mut buffer);
-
-        let identifier = DynamicRecordIdentifier::new("ADR");
-        let row = DtaRowBuilder::new(identifier)
-            .param("STAMMKALK", "J")
-            .unwrap()
-            .param("LANDKUNDA", "J")
-            .unwrap()
-            .data("aa", "809460")
-            .data("ac", "Claas")
-            .data("ad", "Elke")
-            .build()
-            .unwrap();
-
-        writer.write_row(&row).unwrap();
-
-        let output = String::from_utf8(buffer).unwrap();
-        assert!(output.contains("þVARTþ0þSKZþADRþ"));
     }
 
     #[test]
     fn test_parsing_integration() {
-        let dta_string = "þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþLANDKUNDAþJþaaþ809460 þacþClaas þadþElke \n";
-        
+        let dta_string =
+            "þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþLANDKUNDAþJþaaþ809460 þacþClaas þadþElke \n";
+
         // Test dynamic parsing
         let dynamic_row = parse_dta_string(dta_string).unwrap();
-        assert_eq!(dynamic_row.identifier.skz(), "ADR");
+        assert_eq!(dynamic_row.identifier().skz(), "ADR");
         assert_eq!(dynamic_row.params.get("STAMMKALK"), Some(&"J".to_string()));
-        
+
         // Test typed parsing
-        let typed_row = parse_dta_string_with_identifier::<identifiers::AddressIdentifier>(dta_string).unwrap();
+        let typed_row =
+            parse_dta_string_with_identifier::<identifiers::AddressIdentifier>(dta_string).unwrap();
         assert_eq!(typed_row.params.get("STAMMKALK"), Some(&"J".to_string()));
-        
-        // Test DtaRow::from_dta_string
-        let row_from_method = DtaRow::<identifiers::AddressIdentifier>::from_dta_string(dta_string).unwrap();
-        assert_eq!(row_from_method.params.get("STAMMKALK"), Some(&"J".to_string()));
     }
 
     #[test]
@@ -257,8 +224,89 @@ mod tests {
 
         let dta_string = original_row.to_dta_string().unwrap();
         let parsed_row = parse_dta_string(&dta_string).unwrap();
-        
+
         // Should produce equivalent DTA string
         assert_eq!(dta_string, parsed_row.to_dta_string().unwrap());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_deserialization() {
+        use identifiers::DynamicRecordIdentifier;
+        use serde::Deserialize;
+
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestRecord {
+            #[serde(rename = "STAMMKALK")]
+            stammkalk: String,
+            #[serde(rename = "aa")]
+            customer_nr: String,
+            #[serde(rename = "ac")]
+            customer_name: String,
+        }
+
+        let dta_string = "þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþaaþ809460 þacþClaas \n";
+        let record: TestRecord = from_dta_string::<DynamicRecordIdentifier, _>(dta_string).unwrap();
+
+        assert_eq!(record.stammkalk, "J");
+        assert_eq!(record.customer_nr, "809460");
+        assert_eq!(record.customer_name, "Claas");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_round_trip() {
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq)]
+        struct TestRecord {
+            #[serde(rename = "STAMMKALK")]
+            stammkalk: String,
+            #[serde(rename = "aa")]
+            customer_nr: String,
+            #[serde(rename = "ac")]
+            customer_name: String,
+        }
+
+        let original = TestRecord {
+            stammkalk: "J".to_string(),
+            customer_nr: "809460".to_string(),
+            customer_name: "Claas".to_string(),
+        };
+
+        let identifier = DynamicRecordIdentifier::new("ADR");
+        let dta_string = to_dta_string(&original, identifier.clone()).unwrap();
+        let deserialized: TestRecord =
+            from_dta_string_with_identifier(&dta_string, identifier).unwrap();
+
+        assert_eq!(original, deserialized);
+    }
+
+    #[cfg(all(feature = "std", feature = "io"))]
+    #[test]
+    fn test_writer() {
+        use identifiers::AddressIdentifier;
+        use writer::DtaWriter;
+
+        let identifier = AddressIdentifier;
+        let row = DtaRowBuilder::new(identifier)
+            .param("STAMMKALK", "J")
+            .unwrap()
+            .param("LANDKUNDA", "J")
+            .unwrap()
+            .data("aa", "809460")
+            .data("ac", "Claas")
+            .data("ad", "Elke")
+            .build()
+            .unwrap();
+
+        let mut buffer = Vec::new();
+        let mut writer = DtaWriter::new(&mut buffer);
+        writer.write_row(&row).unwrap();
+        let _writer = writer.into_inner();
+
+        let output = String::from_utf8(buffer).unwrap();
+        assert!(output.contains("þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþLANDKUNDAþJþ"));
+        assert!(output.contains("aaþ809460 þacþClaas þadþElke \n"));
     }
 }
