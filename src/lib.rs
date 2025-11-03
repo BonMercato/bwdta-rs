@@ -35,6 +35,7 @@ extern crate alloc;
 
 pub mod error;
 pub mod identifiers;
+pub mod parser;
 pub mod row;
 #[cfg(all(feature = "std", feature = "io"))]
 pub mod writer;
@@ -47,6 +48,7 @@ pub use identifiers::{
     DEFAULT_OPTIONAL_PARAMS, DEFAULT_PARAM_ORDER, DEFAULT_REQUIRED_PARAMS, DynamicRecordIdentifier,
     RecordIdentifier,
 };
+pub use parser::{parse_dta_file, parse_dta_string, parse_dta_string_with_identifier, parse_dta_rows};
 pub use row::{DtaRow, DtaRowBuilder};
 #[cfg(feature = "serde")]
 pub use serde_support::*;
@@ -219,5 +221,44 @@ mod tests {
 
         let output = String::from_utf8(buffer).unwrap();
         assert!(output.contains("þVARTþ0þSKZþADRþ"));
+    }
+
+    #[test]
+    fn test_parsing_integration() {
+        let dta_string = "þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþLANDKUNDAþJþaaþ809460 þacþClaas þadþElke \n";
+        
+        // Test dynamic parsing
+        let dynamic_row = parse_dta_string(dta_string).unwrap();
+        assert_eq!(dynamic_row.identifier.skz(), "ADR");
+        assert_eq!(dynamic_row.params.get("STAMMKALK"), Some(&"J".to_string()));
+        
+        // Test typed parsing
+        let typed_row = parse_dta_string_with_identifier::<identifiers::AddressIdentifier>(dta_string).unwrap();
+        assert_eq!(typed_row.params.get("STAMMKALK"), Some(&"J".to_string()));
+        
+        // Test DtaRow::from_dta_string
+        let row_from_method = DtaRow::<identifiers::AddressIdentifier>::from_dta_string(dta_string).unwrap();
+        assert_eq!(row_from_method.params.get("STAMMKALK"), Some(&"J".to_string()));
+    }
+
+    #[test]
+    fn test_round_trip_parsing() {
+        let identifier = DynamicRecordIdentifier::new("ADR");
+        let original_row = DtaRowBuilder::new(identifier)
+            .param("STAMMKALK", "J")
+            .unwrap()
+            .param("LANDKUNDA", "J")
+            .unwrap()
+            .data("aa", "809460")
+            .data("ac", "Claas")
+            .data("ad", "Elke")
+            .build()
+            .unwrap();
+
+        let dta_string = original_row.to_dta_string().unwrap();
+        let parsed_row = parse_dta_string(&dta_string).unwrap();
+        
+        // Should produce equivalent DTA string
+        assert_eq!(dta_string, parsed_row.to_dta_string().unwrap());
     }
 }

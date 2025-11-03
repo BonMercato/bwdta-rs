@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::DtaError;
 use crate::identifiers::RecordIdentifier;
+use crate::parser;
 
 /// Represents a single DTA record with parameters and data fields.
 ///
@@ -50,6 +51,40 @@ impl<T: RecordIdentifier> DtaRow<T> {
             data_fields: Vec::new(),
             identifier,
         }
+    }
+
+    /// Returns a reference to the record identifier.
+    #[must_use]
+    pub fn identifier(&self) -> &T {
+        &self.identifier
+    }
+
+    /// Parses a DTA format string into a [`DtaRow`] with the given identifier type.
+    ///
+    /// This is a convenience method that delegates to [`parser::parse_dta_string_with_identifier`].
+    /// The identifier type must implement `Default`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DtaError::ParseError`] if the input format is invalid.
+    /// Returns [`DtaError::ParseError`] if the SKZ doesn't match the expected identifier type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bwdta::{row::DtaRow, identifiers::AddressIdentifier};
+    ///
+    /// let dta_string = "þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþLANDKUNDAþJþaaþ809460 þacþClaas þadþElke \n";
+    /// let row = DtaRow::<AddressIdentifier>::from_dta_string(dta_string)?;
+    ///
+    /// assert_eq!(row.params.get("STAMMKALK"), Some(&"J".to_string()));
+    /// # Ok::<(), bwdta::DtaError>(())
+    /// ```
+    pub fn from_dta_string(input: &str) -> Result<Self, DtaError>
+    where
+        T: Default,
+    {
+        parser::parse_dta_string_with_identifier(input)
     }
 
     /// Adds a parameter to this row.
@@ -129,7 +164,7 @@ impl<T: RecordIdentifier> DtaRow<T> {
         let mut all_params = self.params.keys().cloned().collect::<Vec<_>>();
 
         for param in T::param_order() {
-            if param != "VART" {
+            if param != "VART" && param != "UEBER" {
                 if let Some(value) = self.params.get(&param) {
                     all_params.retain(|p| p != &param);
                     parts.push(param.to_string());
@@ -140,9 +175,11 @@ impl<T: RecordIdentifier> DtaRow<T> {
 
         // remaining unsorted params which don't have a fixed order
         for param in all_params {
-            if let Some(value) = self.params.get(&param) {
-                parts.push(param.to_string());
-                parts.push(value.clone());
+            if param != "VART" && param != "UEBER" {
+                if let Some(value) = self.params.get(&param) {
+                    parts.push(param.to_string());
+                    parts.push(value.clone());
+                }
             }
         }
 

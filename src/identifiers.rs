@@ -497,3 +497,39 @@ impl RecordIdentifier for OrderPositionIdentifier {
             .collect()
     }
 }
+
+impl Default for AddressIdentifier {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for AddressProductIdentifier {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for ProductIdentifier {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for DeliveryAddressIdentifier {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for OrderIdentifier {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Default for OrderPositionIdentifier {
+    fn default() -> Self {
+        Self
+    }
+}
