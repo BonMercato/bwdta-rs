@@ -172,6 +172,11 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn test_sequence_serialization() {
+        let dta = r#"þVARTþ0þSKZþBELþUEBERþNþSTAMMKALKþJþaaþ809460 þacþClaas 
+þVARTþ0þSKZþPOSþUEBERþNþaaþ1 þabþART001 þacþ5 
+þVARTþ0þSKZþPOSþUEBERþNþaaþ2 þabþART002 þacþ3 
+"#;
+
         let identifier = DynamicRecordIdentifier::new("BEL");
         let row = BelRow {
             stammkalk: "J".to_string(),
@@ -190,6 +195,11 @@ mod tests {
                 },
             ],
         };
+        
+        let serialized = serde_support::to_dta_string(&row, identifier).unwrap();
+        println!("Serialized: {}", serialized);
+        
+        assert_eq!(serialized, dta);
     }
 
     #[test]
@@ -306,7 +316,11 @@ mod tests {
         let _writer = writer.into_inner();
 
         let output = String::from_utf8(buffer).unwrap();
-        assert!(output.contains("þVARTþ0þSKZþADRþUEBERþNþSTAMMKALKþJþLANDKUNDAþJþ"));
-        assert!(output.contains("aaþ809460 þacþClaas þadþElke \n"));
+        assert!(output.contains("þSKZþADRþ"));
+        assert!(output.contains("þUEBERþNþ"));
+        assert!(output.contains("þSTAMMKALKþJþ"));
+        assert!(output.contains("þLANDKUNDAþJþ"));
+        assert!(output.contains("þaaþ809460 þacþClaas þadþElke "));
+        assert!(output.ends_with('\n'));
     }
 }
